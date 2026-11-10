@@ -441,10 +441,10 @@ bool NativeAdrenoGpuService::start(IOService *provider)
      * (sheng-gpu-power, docs/gpu-hardware-plan.md) shows the GPU SMMU powered and writable: the apps SMMU on this board is
      * hypervisor-managed (docs/native-ufs.md) and the adreno SMMU has not been shown to differ. */
     {
-        uint32_t mib=native_adreno_pool_mib;PE_parse_boot_argn("sheng-gpu-pool",&mib,sizeof(mib));native_adreno_pool_mib=mib;
+        uint32_t mib=native_adreno_pool_mib;PE_parse_boot_argn("gpu-pool",&mib,sizeof(mib));native_adreno_pool_mib=mib;
     }
     uint32_t bringup=0;
-    if(PE_parse_boot_argn("sheng-gpu-bringup",&bringup,sizeof(bringup)) && bringup) {
+    if(PE_parse_boot_argn("gpu-bringup",&bringup,sizeof(bringup)) && bringup) {
 #ifdef SHENG_GMU_CHIP_ID
         if(profile_->chip_id!=SHENG_GMU_CHIP_ID)
             IOLog("NativeAdreno: build targets chip 0x%08x, running 0x%08x\n",
@@ -463,10 +463,10 @@ bool NativeAdrenoGpuService::start(IOService *provider)
                 id0,id1,id2,scr0,fault,static_cast<unsigned long>(smmu_bytes));
             uint32_t bank=0,asid=0,sid=0,slot=0;
             const bool configured=
-                PE_parse_boot_argn("sheng-gpu-bank",&bank,sizeof(bank)) &&
-                PE_parse_boot_argn("sheng-gpu-asid",&asid,sizeof(asid)) &&
-                PE_parse_boot_argn("sheng-gpu-sid",&sid,sizeof(sid)) &&
-                PE_parse_boot_argn("sheng-gpu-slot",&slot,sizeof(slot));
+                PE_parse_boot_argn("gpu-bank",&bank,sizeof(bank)) &&
+                PE_parse_boot_argn("gpu-asid",&asid,sizeof(asid)) &&
+                PE_parse_boot_argn("gpu-sid",&sid,sizeof(sid)) &&
+                PE_parse_boot_argn("gpu-slot",&slot,sizeof(slot));
             if(!configured || bank>63 || !asid || asid>0xffff || sid>0xffff || slot>127) {
                 IOLog("NativeAdreno: bring-up needs bank/asid/sid/slot arguments\n");
             } else {
@@ -521,7 +521,7 @@ bool NativeAdrenoGpuService::start(IOService *provider)
                     uint32_t version=0;
                     if(!firmware_valid_ || !gmu_io_bound_) {
                         IOLog("NativeAdreno: GMU boot needs firmware and bound windows\n");
-                    } else if(!PE_parse_boot_argn("sheng-gpu-cmddb-version",&version,
+                    } else if(!PE_parse_boot_argn("gpu-cmddb-version",&version,
                         sizeof(version)) || !version) {
                         IOLog("NativeAdreno: GMU boot needs sheng-gpu-cmddb-version\n");
                     } else {

@@ -6,7 +6,7 @@
 // is staged out of __mod_init_func and run by the board probe after the original IOGPUFamily kext has loaded, because the
 // parent metaclass does not exist before that. The class is named after the Apple accelerator class on purpose, so original
 // sandbox profiles that name the service class accept the Adreno plugin's open; the Apple AGX kext is never loaded here.
-#include "../NativeMetal/OriginalAcceleratorABI.h"
+#include "AdrenoMetal/OriginalAcceleratorABI.h"   // asteroids: through -I <tree>/drivers (the fork is a symlinked checkout)
 #include <IOKit/IOUserClient.h>
 
 extern "C" IOReturn native_adreno_new_user_client(IOService *,task_t,void *,UInt32,OSDictionary *,IOUserClient **,unsigned);
@@ -28,7 +28,7 @@ IOReturn AGXAccelerator::newUserClient(task_t owningTask,void *securityID,UInt32
     IOUserClient **handler)
 {
     unsigned limit=0;   /* sheng-gpu-metal-opens: connections granted to each process name (0 = unlimited, as on Apple GPUs) */
-    PE_parse_boot_argn("sheng-gpu-metal-opens",&limit,sizeof(limit));
+    PE_parse_boot_argn("gpu-metal-opens",&limit,sizeof(limit));
     return native_adreno_new_user_client(this,owningTask,securityID,type,properties,handler,limit);
 }
 OSObject *AGXAccelerator::copyProperty(const OSSymbol *key) const

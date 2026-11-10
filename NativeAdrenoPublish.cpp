@@ -118,7 +118,7 @@ volatile uint32_t native_adreno_cp_image[22];}
 static unsigned tableMode()
 {
     unsigned mode=native_adreno_cp_aperture[0] && !(native_adreno_cp_aperture[0]>>31) && !native_adreno_cp_aperture[1]?2:1;
-    PE_parse_boot_argn("sheng-gpu-ttbr",&mode,sizeof mode);
+    PE_parse_boot_argn("gpu-ttbr",&mode,sizeof mode);
     return mode==2?2:1;
 }
 
