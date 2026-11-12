@@ -25,6 +25,7 @@ class NativeAdrenoUserClient final {
         bool mapped_state=false;
         bool unreleasable=false;
         bool imported=false;
+        uint32_t imported_pid=0;
         uint32_t metadata_bytes=0;
         uint32_t token=0;
         uint32_t mapping_leases=0;
@@ -42,6 +43,7 @@ class NativeAdrenoUserClient final {
     bool grow();
     void releaseEntries();
     uint32_t stats_slot_=4;   /* the board log's client row (4: the shared overflow row) */
+    uint64_t owned_bytes_=0,owned_peak_=0;   /* its own BOs' bytes now and at most (imports not counted), for the board log */
     NativeAdrenoHandleIndex index_;   /* live handle -> its entries_ index */
     size_t free_hint_=0,live_=0;   /* no free entry below free_hint_; live_ entries are used */
     /* Queues as msm's submitqueues: as many as the client creates (queue 0 from open), grown on demand. */
@@ -65,16 +67,26 @@ class NativeAdrenoUserClient final {
      * range 0). Before either, queue_base_ is only the default 0, which a scoped client may own, so a check of "this client's own range" would
      * test someone else's jobs. */
     bool scoped_=false,used_=false;
+    /* The GPU priorities this process's Metal queues asked for (NativeAdrenoAbiPriority, -1 until one is), and the one a submission
+     * takes: the foreground value while the process renders visible UI and the background one otherwise (the process's GPU role). */
+    int32_t priority_foreground_=-1,priority_background_=-1;
+    uint32_t priority_told_=0;
     NativeAdrenoSubmitBuffer submit_buffers_[NativeAdrenoAbiMaxBuffers]{};   /* submit()'s list: too large for the kernel stack */
     NativeAdrenoAbiSubmit submit_request_{};   /* the submit request as copied in, for the same reason */
     uint64_t window_start_=0,window_bytes_=0,window_peak_=0;
     uint64_t next_handle_=1;
     bool open_=false;
+    NativeAdrenoSystemPages *offered_pages_=nullptr,*freed_pages_=nullptr;
     Entry *find(uint64_t);
     Entry *free();
     void clear(Entry &);
     void publish(Entry &);
 public:
+    /* The GPU priorities this process's Metal queues asked for: the next submission's ring (0 high, 1 low). */
+    IOReturn setPriority(uint32_t foreground,uint32_t background);
+    /* The priority the next submission takes: the foreground value while this process renders visible UI, the background one otherwise
+     * (-1 before any was given). */
+    int32_t submitPriority() const;
     NativeAdrenoUserClient()=default;
     ~NativeAdrenoUserClient()=default;
     NativeAdrenoUserClient(const NativeAdrenoUserClient &)=delete;
@@ -103,6 +115,17 @@ public:
     uint32_t mappingLeases(uint32_t token) const;
     IOReturn query(NativeAdrenoAbiParams *);
     IOReturn allocBo(const NativeAdrenoAbiBoAlloc *,NativeAdrenoAbiBoAllocReply *);
+    /* BoAlloc's system pages prepared before the driver's lock (NativeAdrenoMemory::prepareSystem), offered to the next allocBo under the
+     * lock and withdrawn after it (null: none); allocBo takes them when they fit its request. */
+    void offerSystemPages(NativeAdrenoSystemPages *pages) {offered_pages_=pages;}
+    /* Where the next freeBo under the lock leaves a system BO's pages (NativeAdrenoMemory::releaseSystemInto), for the caller to unwire
+     * and free once the lock is let go (null: freed under it). */
+    void collectFreedPages(NativeAdrenoSystemPages *pages) {freed_pages_=pages;}
+    /* What prepareSystem needs before the lock: whether this client's BOs are write-combined, and its largest BO. */
+    static bool systemWriteCombined();
+    uint64_t boLimit() const {return maxBoBytes();}
+    /* The physical address width the client's GPU tables take: pool pages prepared before the lock lie below it. */
+    uint32_t outputBits() const {return output_bits_;}
     IOReturn allocBoInner(const NativeAdrenoAbiBoAlloc *,NativeAdrenoAbiBoAllocReply *);
     IOReturn mapBo(const NativeAdrenoAbiBoMap *,NativeAdrenoAbiBoMapReply *);
     /* BoImport: pins the caller's pages. Only the IOKit wrapper can call it, with the calling task; dispatch() refuses the method

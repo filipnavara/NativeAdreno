@@ -51,6 +51,7 @@ extern "C" const uint64_t native_adreno_sqe_firmware_image_size __attribute__((w
 /* Physical address of the fence page (the CP writes its timestamps there): the board log reads it from DRAM and through the CPU cache. */
 extern "C" {volatile uint64_t native_adreno_fence_phys=0;}
 enum : size_t { NoWindow = ~size_t(0) };
+extern "C" volatile uint32_t native_adreno_diag;   /* NativeAdrenoSubmit.cpp */
 
 class NativeAdrenoGpuClient;
 static IOUserClient *createGpuClient(task_t,void *,UInt32,OSDictionary *,NativeAdrenoUserClient *);
@@ -435,10 +436,10 @@ bool NativeAdrenoGpuService::start(IOService *provider)
     } else {
         IOLog("NativeAdreno: SMMU node not published yet\n");
     }
-    /* Explicit opt-in (sheng-gpu-bringup=1). Without the bank/asid/sid/slot arguments the SMMU window is only read
+    /* Explicit opt-in (gpu-bringup=1). Without the bank/asid/sid/slot arguments the SMMU window is only read
      * (identity and fault registers). With all four arguments the sequence below PROGRAMS the SMMU: it prepares a context
      * bank, attaches the stream and maps the GMU payloads. Do not run it before the read-only power/clock observation
-     * (sheng-gpu-power, docs/gpu-hardware-plan.md) shows the GPU SMMU powered and writable: the apps SMMU on this board is
+     * (gpu-power, docs/gpu-hardware-plan.md) shows the GPU SMMU powered and writable: the apps SMMU on this board is
      * hypervisor-managed (docs/native-ufs.md) and the adreno SMMU has not been shown to differ. */
     {
         uint32_t mib=native_adreno_pool_mib;PE_parse_boot_argn("gpu-pool",&mib,sizeof(mib));native_adreno_pool_mib=mib;
@@ -523,7 +524,7 @@ bool NativeAdrenoGpuService::start(IOService *provider)
                         IOLog("NativeAdreno: GMU boot needs firmware and bound windows\n");
                     } else if(!PE_parse_boot_argn("gpu-cmddb-version",&version,
                         sizeof(version)) || !version) {
-                        IOLog("NativeAdreno: GMU boot needs sheng-gpu-cmddb-version\n");
+                        IOLog("NativeAdreno: GMU boot needs gpu-cmddb-version\n");
                     } else {
                         IODeviceMemory *db=IODeviceMemory::withRange(
                             SHENG_GMU_COMMAND_DB_BASE,SHENG_GMU_COMMAND_DB_BYTES);
@@ -607,6 +608,12 @@ bool NativeAdrenoGpuService::start(IOService *provider)
                                             ring_status=ring_.setRegisters(regs_);
                                             if(!ring_status)ring_status=ring_.attach(&ring_io,&cache,ring_mem_.mapping(),
                                                 ring_bytes,ring_iova,fence_mem_.mapping(),fence_bytes,fence_iova);
+                                            /* With the diagnostics (diag=1) framed submissions stamp the CP's always-on counter before and after their
+                                             * buffers; gpu-timeline=0 or 1 overrides that. */
+                                            {unsigned timeline=0,diag=0;PE_parse_boot_argn("diag",&diag,sizeof(diag));
+                                             native_adreno_diag=diag==1;
+                                             if(!PE_parse_boot_argn("gpu-timeline",&timeline,sizeof(timeline)))timeline=diag==1;
+                                             ring_.setTimeline(timeline!=0);}
                                             if(!ring_status && sqe_bytes) {
                                                 memcpy(sqe_mem_.mapping(),native_adreno_sqe_firmware_image,
                                                     size_t(native_adreno_sqe_firmware_image_size));

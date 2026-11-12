@@ -35,7 +35,7 @@ static int barrier(void *cookie){CHECK(cookie==&peer);++peer.barriers;
     if(peer.log_order)peer.order.push_back("barrier");return 0;}
 static int publish(void *cookie,const volatile uint32_t *words,size_t bytes)
 {
-    CHECK(cookie==&peer && words && bytes==32768);++peer.publish;
+    CHECK(cookie==&peer && words && (bytes==32768 || bytes==4096));++peer.publish;
     if(peer.log_order)peer.order.push_back("publish");
     return peer.publish==peer.fail_publish;
 }
@@ -115,6 +115,29 @@ int main()
             observed==1 && r.outstanding()==0 && r.completedFence()==1);
         CHECK(r.wait(2,&clock_,5000,&observed)==NativeAdrenoRingFenceArgument);
         CHECK(r.detach()==kIOReturnSuccess);
+    }
+    /* Timeline stamps: the CP's always-on counter is read into the fence page before the user words and after them, and read back by fence. */
+    {
+        reset();NativeAdrenoRing r;
+        CHECK(attach(r)==kIOReturnSuccess);
+        r.setTimeline(true);
+        const uint32_t words[4]={0x11111111,0x22222222,0x33333333,0x44444444};
+        uint32_t end=0;
+        CHECK(r.submitFramed(words,4,&end)==kIOReturnSuccess && end==1);
+        CHECK(peer.writes.back().first==0x0807 && peer.writes.back().second==46+8);
+        auto op=[](uint32_t header) {return (header>>28)==7u?(header>>16)&0x7fu:0xffu;};
+        CHECK(op(ring[6])==0x26 && op(ring[7])==0x3e && ring[8]==(0x980u|(2u<<18)|(1u<<30)) && ring[9]==0x108000u+512+16 && ring[10]==0);
+        CHECK(op(ring[11])==0x17 && ring[12]==3 && op(ring[13])==0x65 && ring[14]==0x101);
+        for(unsigned i=0;i<4;++i)CHECK(ring[15+i]==words[i]);
+        CHECK(op(ring[21])==0x17 && ring[22]==1 && op(ring[23])==0x3e && ring[24]==(0x980u|(2u<<18)|(1u<<30)) && ring[25]==0x108000u+512+16+8 && ring[26]==0);
+        CHECK(op(ring[27])==0x46 && ring[28]==0x18);
+        uint64_t start=0,stop=0;
+        fence[132]=1000;fence[133]=0;fence[134]=1700;fence[135]=0;
+        CHECK(r.timeline(1,&start,&stop)==31 && start==1000 && stop==1700);
+        fence[134]=0;fence[135]=0;
+        CHECK(r.timeline(1,&start,&stop)==31 && start==1000 && stop==0);
+        NativeAdrenoRing off;
+        CHECK(attach(off)==kIOReturnSuccess && off.timeline(1,&start,&stop)==5);
     }
     /* A requested context reset puts a6xx_set_pagetable()'s A7XX context entry into the next framed prologue, once. */
     {
@@ -252,4 +275,32 @@ int main()
         std::printf("PASS: 1 exact ring programming and submission, 1 wrap submission, 1 refused re-attach, 7 write/1 read attach failures and 4 post-commit poison cases over a software CP register peer (%u failure cases)\n",
             cases);
     }
+    {
+        reset();NativeAdrenoRing r;CHECK(attach(r)==kIOReturnSuccess);
+        CHECK(r.setPreempt(0x200000,0x300000,0x108008)==kIOReturnSuccess);
+        CHECK((fence[16]>>16&127)==0x21 && fence[17]==0x050e && fence[18]==0 && fence[19]==1);
+        CHECK((fence[20]>>16&127)==0x3c && fence[21]==3 && fence[22]==0x050f && fence[24]==1 && fence[25]==1);
+        CHECK(r.resetExecutedTable(0x1234000010000000ull)==kIOReturnSuccess);
+        uint64_t table=0;CHECK(r.executedTable(&table)==kIOReturnSuccess && table==0x1234000010000000ull);
+        r.useTable(0x5678000020000000ull);r.useContext(42);
+        const uint32_t nop=0x70100000;uint32_t end=0;
+        CHECK(r.submitFramed(&nop,1,&end)==kIOReturnSuccess);
+        bool update=false,snapshot=false,amble=false;
+        for(size_t i=0;i<r.writePointer();++i) {
+            const auto h=ring[i];if(h>>28!=7)continue;
+            if((h>>16&127)==0x53) {CHECK(ring[i+1]==0x20000000 && ring[i+2]==0x56780000);update=true;}
+            if((h>>16&127)==0x3d) {CHECK(update && ring[i+1]==0x108080 && ring[i+3]==0x20000000 && ring[i+4]==0x56780000);snapshot=true;}
+            if((h>>16&127)==0x55) {CHECK(ring[i+1]==0x108040 && ring[i+3]==(11|(3<<20)));amble=true;}
+        }
+        CHECK(update && snapshot && amble);
+        CHECK(r.executedTable(&table)==kIOReturnSuccess && table==0x1234000010000000ull); // CPU queued, GPU has not executed
+        fence[32]=0x20000000;fence[33]=0x56780000;
+        CHECK(r.executedTable(&table)==kIOReturnSuccess && table==0x5678000020000000ull);
+        r.setCurrent(false);peer.regs[0x0806]=8191;fence[0]=r.writePointer();
+        const unsigned reads=peer.read_calls;
+        CHECK(r.submitFramed(&nop,1,&end)==kIOReturnSuccess && peer.read_calls==reads);
+        CHECK(r.restart(2)==kIOReturnSuccess && (fence[16]>>16&127)==0x21);
+        std::puts("PASS preemption postamble, executed table snapshot, inactive-ring read pointer and restart");
+    }
+
 }

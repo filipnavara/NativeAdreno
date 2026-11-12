@@ -29,8 +29,8 @@ enum {
     NativeAdrenoMethodBoCpuUnmap = 14,
     NativeAdrenoMethodGetDeviceInfo = 15,
     NativeAdrenoMethodBoImport = 16,
-    NativeAdrenoMethodSetPriority = 17,   /* asteroids: declared for upstream Turnip; this kernel answers kIOReturnUnsupported */
-    NativeAdrenoMethodNote = 18,          /* asteroids: likewise */
+    NativeAdrenoMethodSetPriority = 17,
+    NativeAdrenoMethodNote = 18,
     NativeAdrenoAbiMetadataBytes = 64
 };
 struct NativeAdrenoAbiParams {

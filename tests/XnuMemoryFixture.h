@@ -4,6 +4,7 @@
 #define NATIVE_ADRENO_XNU_MEMORY_FIXTURE_H
 #include <cstddef>
 #include <cstdint>
+typedef int boolean_t;   /* the kernel's PE_parse_boot_argn declaration in NativeAdrenoMemory.cpp */
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
@@ -21,13 +22,23 @@ constexpr unsigned kIODirectionOut=2,kIODirectionInOut=3,kIOMemoryMapperNone=0x8
  kIOMemoryPageable=0x20;
 /* The kernel's physical range (phystokv's), wide enough for every fixture address. */
 extern "C" {inline uint64_t gPhysBase=0,gPhysSize=UINT64_C(1)<<36;}
+/* The host kernel manages its own range only. */
+extern "C" inline int pmap_valid_address(uint64_t physical) {return physical>=gPhysBase && physical-gPhysBase<gPhysSize;}
 inline void *IOMallocZero(size_t bytes) {return std::calloc(1,bytes);}
+inline void IOFree(void *p,size_t) {std::free(p);}
+/* A mutex that knows whether it is held: taking it twice or letting go of one not held ends the test (a leaf lock stays a leaf). */
+struct IOLock {bool held=false;};
+inline IOLock *IOLockAlloc() {return new IOLock;}
+inline void IOLockFree(IOLock *lock) {delete lock;}
+inline void IOLockLock(IOLock *lock) {if(!lock || lock->held)std::abort();lock->held=true;}
+inline void IOLockUnlock(IOLock *lock) {if(!lock || !lock->held)std::abort();lock->held=false;}
 inline void *kernel_task=reinterpret_cast<void *>(1);
 using task_t=void *;
 /* ScatterUnlessContiguous: what the tablet does, one physical page per span unless the caller asked for contiguous memory. */
 enum SegmentMode {Contiguous,Scattered,ZeroPhysical,UnalignedPhysical,ShortSegment,HighPhysical,Paired,ScatterUnlessContiguous};
 class IOBufferMemoryDescriptor;
 struct MemoryFixture {
+    int gpu_role=6;
     unsigned created=0,prepared=0,completed=0,released=0,cache_calls=0,segment_calls=0;
     unsigned pageable=0,write_combined_entries=0;   /* inTaskWithOptions: pageable buffers with no task, those with a write-combined entry */
     unsigned allocation_fail_count=0;
@@ -166,4 +177,6 @@ using ppnum_t=uint32_t;
 inline uint64_t mach_absolute_time() {static uint64_t now;return ++now;}
 inline void nanoseconds_to_absolutetime(uint64_t ns,uint64_t *out) {*out=ns;}
 inline void IODelay(unsigned) {}
+inline task_t current_task() {return reinterpret_cast<task_t>(2);}
+inline int task_get_gpu_role(task_t) {return fixture.gpu_role;}
 #endif
