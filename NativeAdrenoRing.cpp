@@ -172,8 +172,30 @@ IOReturn NativeAdrenoRing::stallState(uint32_t *out)
         0x0210,0x0211,0x0212,0x0213,0x0201,0x0821,0x0825,0x0824,RingRptr,RingWptr,
         0x0928,0x0929,0x092a,0x092b,0x092c,0x092d,0x0a66,0x0a6d,0x0a70,0x0a74,0x0a71,0x0a72};
     if(!out)return kIOReturnBadArgument;
-    for(uint32_t i=0;i<NativeAdrenoRingStallWords;++i)
-        if(io_.read32(io_.cookie,regs[i],&out[i]))return poison();
+    if(!regs_->aperture) {
+        for(uint32_t i=0;i<NativeAdrenoRingStallWords;++i)
+            if(io_.read32(io_.cookie,regs[i],&out[i]))return poison();
+        return kIOReturnSuccess;
+    }
+    /* asteroids gen8: the A7XX offsets name other registers here, and the IB registers are per pipe behind CP_APERTURE_CNTL_HOST
+     * (a6xx.xml A8XX: CP_IB1_BASE 0x900, CP_IB1_REM_SIZE 0x902, CP_IB2_BASE 0x904, CP_IB2_REM_SIZE 0x906). The same slots as gen7:
+     * [0] RBBM_STATUS, [1] RBBM_STATUS1, [2] CP_INTERRUPT_STATUS_GLOBAL, [3] BR CP_INTERRUPT_STATUS_PIPE, [4] RBBM_INT_0_STATUS,
+     * [5] BR CP_HW_FAULT_STATUS_PIPE, [6] BV CP_HW_FAULT_STATUS_PIPE, [7] BR CP_PROTECT_STATUS_PIPE, [8] RPTR, [9] WPTR, [10..15] BR IB1
+     * base lo/hi, IB1 rem, IB2 base lo/hi, IB2 rem, [16] CP_RB_RPTR_BV, [17] BV IB1 base lo, [18] BV IB1 rem, [19] BV IB2 rem,
+     * [20..21] BV IB2 base lo/hi. The aperture is put back to 0 as the IRQ handler leaves it. */
+    struct Read {uint32_t pipe,reg;};
+    static const Read gen8[NativeAdrenoRingStallWords]={
+        {0,0x0012},{0,0x0013},{0,0x08b5},{1,0x08b7},{0,0x006a},{1,0x08b3},{2,0x08b3},{1,0x084f},{0,RingRptr},{0,RingWptr},
+        {1,0x0900},{1,0x0901},{1,0x0902},{1,0x0904},{1,0x0905},{1,0x0906},{0,0x080a},{2,0x0900},{2,0x0902},{2,0x0906},{2,0x0904},{2,0x0905}};
+    uint32_t pipe=0;
+    for(uint32_t i=0;i<NativeAdrenoRingStallWords;++i) {
+        if(gen8[i].pipe!=pipe) {
+            pipe=gen8[i].pipe;
+            if(io_.write32(io_.cookie,regs_->aperture,pipe<<regs_->aperture_pipe_shift))return poison();
+        }
+        if(io_.read32(io_.cookie,gen8[i].reg,&out[i]))return poison();
+    }
+    if(pipe && io_.write32(io_.cookie,regs_->aperture,0))return poison();
     return kIOReturnSuccess;
 }
 IOReturn NativeAdrenoRing::kick()

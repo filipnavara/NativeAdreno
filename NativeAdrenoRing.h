@@ -209,7 +209,8 @@ public:
     /* Reads the CP's state for a fence that stopped advancing into out[NativeAdrenoRingStallWords]: RBBM_STATUS..STATUS3,
      * RBBM_INT_0_STATUS, CP_HW_FAULT, CP_STATUS_1, CP_PROTECT_STATUS, CP_RB_RPTR, CP_RB_WPTR, CP_IB1_BASE (lo, hi),
      * CP_IB1_REM_SIZE, CP_IB2_BASE (lo, hi), CP_IB2_REM_SIZE, CP_BV_RB_RPTR, CP_BV_IB1_BASE lo, CP_BV_IB1_REM_SIZE,
-     * CP_BV_IB2_REM_SIZE. Never writes a register; a failed read is poison. */
+     * CP_BV_IB2_REM_SIZE. Gen7 never writes a register; gen8 reads the IB registers per pipe through CP_APERTURE_CNTL_HOST (the
+     * slots are listed in stallState). A failed read is poison. */
     IOReturn stallState(uint32_t *out);
     /* Writes CP_RB_WPTR again with the value already published: for a CP that went idle with work in the ring (a lost write pointer
      * notification); harmless when the CP already saw it. */
