@@ -72,7 +72,6 @@ enum : uint32_t {
     RingSetAmble = 0x55,
     RingRegRmw = 0x21,
     RingRegToMem = 0x3e,      /* CP_REG_TO_MEM */
-    RingAlwaysOnCounter = 0x0980,   /* CP_ALWAYS_ON_COUNTER, 64 bit */
     RingStampWords = 4,
     RingStampOffset = 512,    /* the timeline slots in the fence page: 64 of 16 bytes */
     RingFenceWords = 7,       /* kernel bring-up submissions: TYPE4 scratch + TYPE7 event */
@@ -226,10 +225,11 @@ static size_t packet(uint32_t *words,size_t at,uint32_t opcode,const uint32_t *p
     return at+1+count;
 }
 /* CP_REG_TO_MEM of the always-on counter into the timeline slot of this fence (second: the end half). */
-static size_t stamp(uint32_t *words,size_t at,uint64_t fence_iova,uint32_t seqno,bool end)
+/* The counter is the generation's (regs->cp_always_on_counter): gen7 0x0980; gen8 0x08e7, where 0x0980 is another register. */
+static size_t stamp(uint32_t *words,size_t at,uint32_t counter,uint64_t fence_iova,uint32_t seqno,bool end)
 {
     const uint64_t to=fence_iova+RingStampOffset+(uint64_t)(seqno&63)*16+(end?8:0);
-    const uint32_t payload[3]={RingAlwaysOnCounter|(2u<<18)|(1u<<30),(uint32_t)to,(uint32_t)(to>>32)};
+    const uint32_t payload[3]={counter|(2u<<18)|(1u<<30),(uint32_t)to,(uint32_t)(to>>32)};
     return packet(words,at,RingRegToMem,payload,3);
 }
 /* Thread selection and IFPC disable before the user buffers, as a7xx_submit() does; the first submission after
@@ -278,7 +278,7 @@ IOReturn NativeAdrenoRing::emitPrologue(uint32_t at,bool reset,bool table,uint32
     if(n)n=packet(words,n,RingFenceOpcode,&flush,1);
     if(n)n=packet(words,n,RingFenceOpcode,&invalidate7,1);
     if(n)n=packet(words,n,RingWaitForIdle,nullptr,0);
-    if(n && stamps_)n=stamp(words,n,fence_iova_,number,false);
+    if(n && stamps_)n=stamp(words,n,regs_->cp_always_on_counter,fence_iova_,number,false);
     if(n && preempt_) {
         const uint32_t pseudo[12]={RingPseudoSmmuInfo,0,0,RingPseudoNonSecureSave,(uint32_t)record_iova_,(uint32_t)(record_iova_>>32),
             RingPseudoNonPrivSave,0,0,RingPseudoCounter,0,0};
@@ -329,7 +329,7 @@ IOReturn NativeAdrenoRing::emitFramedFence(uint32_t at,uint32_t seqno,uint32_t *
     const uint32_t bvWait[4]={0,(uint32_t)bv,(uint32_t)(bv>>32),seqno};
     const uint32_t fence[4]={RingFenceEvent|RingFenceEnable|RingFenceIrq,(uint32_t)at4,(uint32_t)(at4>>32),seqno};
     size_t n=packet(words,2,RingThreadControl,&br,1);
-    if(n && stamps_)n=stamp(words,n,fence_iova_,seqno,true);
+    if(n && stamps_)n=stamp(words,n,regs_->cp_always_on_counter,fence_iova_,seqno,true);
     if(n)n=packet(words,n,RingFenceOpcode,&depth,1);
     if(n)n=packet(words,n,RingFenceOpcode,&color,1);
     if(n)n=packet(words,n,RingThreadControl,&bvThread,1);
